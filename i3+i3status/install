@@ -1,0 +1,402 @@
+#===================================
+#	1 Предварительная настройка
+#===================================
+
+# Гайд по установке
+Installation_guide
+
+# При проводном подключении настройки получаются по DHCP автоматически
+# Использовать для настройки беспроводного подключения
+iwctl
+
+# Список физических устройств, вендор, модель
+[iwd]# adapter list
+
+# Список интерфейсов, mac, решим работы
+[iwd]# device list
+
+# Получить список беспроводных сетей
+station <wlan> get-networks
+
+# Подключение к беспроводной сети (запросит пароль)
+station <wlan> connect <"network name">
+
+# Проверить состояне подключения к беспроводной сети
+station <wlan> show
+
+# Узнать mac, ip, названия сетевых интерфейсов, проверить состояние
+ip addr
+
+# Сменить пароль root и можно подключаться удаленно по ssh
+passwd
+
+# Если нужна русская раскладка
+localectl list-keymaps | grep ru
+
+# Загрузка раскладки
+loadkeys ruwin_ctrl-UTF-8
+
+# Обновить пакеты
+pacman -Sy
+
+
+#===================================
+#	2 Установка Arch
+#===================================
+
+# Список дисков
+lsblk
+
+# Разметка диска
+gdisk /dev/nvme0n1
+
+# Создание разделов
+Command (? for help): n
+Partition number (1-128, default 1):
+First sector (2048-500118158, default = 2048) or {+-}size{KMGTP}:
+Last sector (2048-500118158, default = 500117503) or {+-}size{KMGTP}: +350M
+Current type is 8300 (Linux filesystem)
+Hex code or GUID (L to show codes, Enter = 8300): ef00
+Changed type of partition to 'EFI system partition'
+
+Command (? for help): n
+Partition number (2-128, default 2):
+First sector (718848-500118158, default = 718848) or {+-}size{KMGTP}:
+Last sector (718848-500118158, default = 500117503) or {+-}size{KMGTP}:
+Current type is 8300 (Linux filesystem)
+Hex code or GUID (L to show codes, Enter = 8300):
+Changed type of partition to 'Linux filesystem'
+
+Command (? for help): w
+
+Final checks complete. About to write GPT data. THIS WILL OVERWRITE EXISTING
+PARTITIONS!!
+
+Do you want to proceed? (Y/N): y
+OK; writing new GUID partition table (GPT) to /dev/nvme0n1.
+The operation has completed successfully.
+
+# Проверить разделы
+lsblk
+
+#===================================
+#	3 Создание файловых систем
+#===================================
+
+# Создание EFI файловой системы
+mkfs.vfat /dev/nvme0n1p1
+
+# Создание btrfs файловой системы
+mkfs.btrfs /dev/nvme0n1p2
+
+#===================================
+#	4 Монтирование файловых систем, cабвольюмы
+#===================================
+
+# Монтирование раздела в /mnt
+mount /dev/nvme0n1p2 /mnt
+
+# Созданик корневого сабволльюма
+btrfs subvolume create /mnt/@
+
+# Создание сабвольюма home
+btrfs subvolume create /mnt/@home
+
+# Создание сабвольюма var
+btrfs subvolume create /mnt/@var
+
+# Размонтирование /mnt с целью перемонтировать сабвольюмы
+umount /mnt
+
+# Монтирование сабвольюма @ в /mnt с параметрами noatime (no access time) - увеличивает скорость диска, compress=zstd (сжатие), ssd (используется ssd), discard=assync (улучшает производительность ssd)
+mount -o noatime,compress=zstd,ssd,discard=async,space_cache=v2,subvol=@ /dev/nvme0n1p2 /mnt
+
+# Создание каталогов в /mnt для монтирования остальных сабвольюмов
+mkdir -p /mnt/{boot/efi,home,var}
+
+# Монтирование остальных сабвольюмов
+mount -o noatime,compress=zstd,ssd,discard=async,space_cache=v2,subvol=@home /dev/nvme0n1p2 /mnt/home
+mount -o noatime,compress=zstd,ssd,discard=async,space_cache=v2,subvol=@var /dev/nvme0n1p2 /mnt/var
+
+# Монтирование efi раздела
+mount /dev/nvme0n1p1 /mnt/boot/efi
+
+#===================================
+#	5 Установка базовых пакетов
+#===================================
+
+# Обновление ключей pacman
+pacman-key --init
+pacman-key --populate
+pacman-key --refresh-keys
+pacman -Sy archlinux-keyring
+
+# Установка основных пакетов в /mnt
+pacstrap /mnt base linux linux-firmware git vim amd-ucode btrfs-progs
+
+(133/133) checking keys in keyring                                                                                 [####################################################################] 100%
+warning: Public keyring not found; have you run 'pacman-key --init'?
+downloading required keys...
+error: keyring is not writable
+error: required key missing from keyring
+error: failed to commit transaction (unexpected error)
+Errors occurred, no packages were upgraded.
+==> ERROR: Failed to install packages to new root
+pacstrap /mnt base linux linux-firmware git vim amd-ucode btrfs-progs  3.61s user 9.32s system 12% cpu 1:45.54 total
+
+
+#===================================
+#	6 Генерация fstab
+#===================================
+
+# Генерация fstab на основе текущих смонитрованных томов
+genfstab -U /mnt >> /mnt/etc/fstab
+
+# Переход в устанавливаемую систему
+arch-chroot /mnt
+
+# Проверка fstab
+cat /etc/fstab
+
+#===================================
+#	7 Настройка системы
+#===================================
+
+# Пропустить
+# Список часовых поясов
+#timedatectl list-timezones
+#timedatectl list-timezones | grep Moscow
+# Конец Пропустить
+
+# Создание симлинка с настройками часового пояса
+ln -sf /usr/share/zoneinfo/Europe/Moscow /etc/localtime
+
+# Синхронизация часов
+hwclock --systohc
+
+# Отредактировать /etc/locale.gen, раскомментировать необходимые локали (
+vim /etc/locale.gen
+
+# Генерирование локалей
+locale-gen
+
+echo "LANG=en_US.UTF-8" >> /etc/locale.conf
+
+# Присвоение хосту нового имени
+echo "arch" >> /etc/hostname
+
+
+# Настроить конфиг /etc/hosts
+
+vim /etc/hosts
+
+Добавить:
+127.0.0.1       localhost
+::1             localhost
+127.0.1.1       arch.localdomain    arch
+
+#===================================
+#	8 Установка пакетов
+#===================================
+
+# Установка пакетов
+# grub - загрузчик
+# networkmanager, network-manager-applet - настройка сети
+# base-devel, linux-headers - пакеты для разработки
+# bluez, bluez-utils - пакеты для bluetooth
+# pulseaudio, alsa-utils - пакеты для звукового сервера
+pacman -S grub efibootmgr networkmanager network-manager-applet dialog wpa_supplicant mtools dosfstools base-devel linux-headers bluez bluez-utils xdg-utils xdg-user-dirs pulseaudio alsa-utils
+
+#===================================
+#	9 Настройка grub
+#===================================
+
+# Установка grub в /boot/efi
+grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB
+
+# Создание конфига grub
+grub-mkconfig -o /boot/grub/grub.cfg
+
+#===================================
+#	9 Настройка системы
+#===================================
+
+# Автозапуск служб
+systemctl enable NetworkManager
+systemctl enable bluetooth
+systemctl enable fstrim.timer
+
+# Добавление пользователя
+useradd -m morza
+
+# Установка пароля пользователю
+passwd morza
+
+# Добавление пользователя в группу wheel для использования команды sudo
+usermod -aG wheel morza
+
+EDITOR=vim visudo
+
+vim /etc/mkinitcpio.conf
+mkinitcpio -p linux
+
+exit
+
+# Размонтирование разделов установленной системы
+umount -R /mnt
+
+# Консольно
+reboot
+
+#===================================
+#	10 Настройка внешнего вида
+#===================================
+
+sudo pacman -S xorg lightdm lightdm-slick-greeter i3 dmenu lxappearance nitrogen archlinux-wallpaper xfce4-terminal picom vivaldi
+
+sudo systemctl enable lightdm
+
+sudo vim /etc/lightdm/lightdm.conf
+
+# Клонирование пакета paru, помогающего работать с AUR репозиториями
+git clone https://aur.archlinux.org/paru-bin
+
+cd paru-bin
+
+# Сборка и установка пакета paru
+makepkg -si
+
+# Установка timeshift
+paru -S timeshift timeshift-autosnap zramd lightdm-settings
+
+# Установка пакета добавляющего снимки timeshift в пункты меню grub
+sudo pacman -S grub-btrfs
+
+sudo systemctl enable --now zramd
+
+lsblk
+
+vim .config/i3/config
+
+cp /etc/xdg/picom.conf .config/
+
+vim .config/picom.conf
+
+paru -S j4-dmenu-desktop
+
+# Установка покетов темы и темы иконок
+sudo pacman -S arc-gtk-theme papirus-icon-theme
+
+# Установка файлового менеджера
+sudo pacman -S thunar
+
+# Настройки фонового изображения, темы, темы иконок
+sudo lightdm-settings
+
+cp /etc/i3status.conf .config/i3/
+
+vim .config/i3/config
+
+# Установка шрифта DeJavu
+sudo pacman -S ttf-dejavu
+
+setxkbmap -query
+
+localectl set-x11-keymap --no-convert us,ru pc105 "" grp:ctrl_shift_toggle
+
+#===================================
+#	11 Настройка timeshift
+#===================================
+
+sudo timeshift-gtk
+
+sudo grub-mkconfig -o /boot/grub/grub.cfg
+
+
+  #=================================
+#===================================
+#	12 Периферия, TODO
+#===================================
+
+# Переключение раскладки
+# в файл /etc/X11/xorg.conf.d/00-keyboard.conf
+Section "InputClass"
+        Identifier "system-keyboard"
+        MatchIsKeyboard "on"
+        Option "XkbLayout" "us,ru"
+        Option "XkbModel" "pc105"
+        Option "XkbOptions" "grp:ctrl_shift_toggle"
+EndSection
+
+
+# Отображение текущей раскладки клавиатуры в lightdm-slick-greeter и в i3status
+paru -S fbxkb
+# Добавить в конфиг i3 строку:
+
+
+# Изменение цветовой схемы Vim
+Добавить строки в /etc/vimrc
+colorscheme desert
+syntax online
+
+# font-awesome в i3status
+# Иконки в конфиге i3status.conf
+sudo pacman -S ttf-font-awesome
+
+# Более красивый lockscreen
+# внесены изменения в конфиг i3
+paru -S betterlockscreen
+mkdir -p ~/.config/betterlockscreen/
+cp /usr/share/doc/betterlockscreen/examples/betterlockscreenrc ~/.config/betterlockscreen/
+betterlockscreen -u /usr/share/backgrounds/archlinux/sunset.jpg
+
+# Timeshift в облако
+
+# Предотвращение увеличения громкости с клавиатуры выше 100%
+Реализовано в конфиге i3
+
+# Управление яркостью дисплея с клавиатуры 
+sudo pacman -S acpid
+sudo systemctl enable acpid --now
+# Жать клавиши управления яркостью после команд
+acpi_listen
+sudo pacman -S light
+sudo chmod +s /usr/bin/light
+
+# Фоновое изображение grub, размер шрифта
+# поместить 1920x1080 png 24-bit в /boot/grub
+# добавить в конфиг и выполнить
+sudo grub-mkconfig -o /boot/grub/grub.cfg
+
+# Поправить цвета текста и размер шрифта в grub для удобочитаемости
+
+# Управление bluetooth
+sudo pacman -S blueman pulseaudio-bluetooth
+
+# Предотвращение автоматического включения BT адаптера
+gsettings set org.blueman.plugins.powermanager auto-power-on false
+ 
+# OBS
+sudo pacman -S obs-studio
+
+# Steam
+
+# League of legends, Eve online
+pacman -S fft-ms-fonts lutris
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
