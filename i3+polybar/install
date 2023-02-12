@@ -1,0 +1,9 @@
+sudo pacman -S noto-fonts terminus-font
+sudo pacman -S rofi
+
+# Размер шрифта около ~1.4Гб, целесообразно ли тратить столько дискового пространства ради нескольких иконок в polybar?)
+paru -S ttf-material-icons
+paru -S ttf-font-awesome-4
+paru -S siji-git
+
+rofi-theme-selector
